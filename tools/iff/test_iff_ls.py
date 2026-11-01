@@ -83,3 +83,14 @@ def test_real_file_smoke():
     scne = next(e.name for e in entries if e.kind == "scene-json")
     rows = iff_ls.skeleton(iff_ls.read_json_entry(path, scne))
     assert rows[0][0] == "def_hips" and len(rows) > 50
+
+
+def test_gen1_header_is_described_not_parsed(tmp_path):
+    path = tmp_path / "old.iff"
+    # magic, headerSize, fileLength(BE), zero, blockCount, unk1, fileCount, unk2  (NBA 2K14 PC sample values)
+    path.write_bytes(bytes.fromhex("305098f0") + struct.pack("<I", 546) + struct.pack(">I", 546)
+                     + struct.pack("<5I", 0, 1, 0x15, 14, 0x2D))
+    info = iff_ls.gen1_header(str(path))
+    assert info["file_count"] == 14 and info["block_count"] == 1 and info["header_size"] == 546
+    with pytest.raises(NotImplementedError):
+        iff_ls.list_entries(str(path))

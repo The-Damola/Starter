@@ -51,7 +51,33 @@ def classify(name: str, head: bytes) -> str:
     }.get(ext, "unknown")
 
 
+GEN1_MAGICS = {
+    bytes.fromhex("305098f0"): "gen-1 IFF, little-endian (NBA 2K9-2K14 PC)",
+    bytes.fromhex("ff3bef94"): "gen-1 IFF, big-endian (College Hoops 2K8 / 2K8-era consoles)",
+}
+
+
+def gen1_header(path: str) -> dict | None:
+    """Describe a pre-2K15 container. Sub-file parsing is not implemented; see docs/research/iff-format.md."""
+    with open(path, "rb") as f:
+        head = f.read(0x20)
+    kind = GEN1_MAGICS.get(head[:4])
+    if kind is None:
+        return None
+    endian = "<" if "little" in kind else ">"
+    header_size, _file_len_be, _zero, block_count, _u1, file_count, _u2 = struct.unpack(endian + "7I", head[4:32])
+    return {"kind": kind, "header_size": header_size, "block_count": block_count, "file_count": file_count}
+
+
 def list_entries(path: str) -> list[Entry]:
+    if not zipfile.is_zipfile(path):
+        info = gen1_header(path)
+        if info:
+            raise NotImplementedError(
+                f"{info['kind']}: header {info['header_size']} bytes, {info['block_count']} block(s), "
+                f"{info['file_count']} sub-files. Only the ZIP-era (2K15+) layout is parsed."
+            )
+        raise ValueError("not a ZIP-era .iff and no known gen-1 magic")
     with zipfile.ZipFile(path) as z:
         out = []
         for info in z.infolist():
@@ -120,7 +146,11 @@ def main(argv: list[str] | None = None) -> int:
         print()
         return 0
 
-    entries = list_entries(args.iff)
+    try:
+        entries = list_entries(args.iff)
+    except (NotImplementedError, ValueError) as e:
+        print(e, file=sys.stderr)
+        return 2
     if args.skeleton:
         scne = next((e.name for e in entries if e.kind == "scene-json"), None)
         if scne is None:
